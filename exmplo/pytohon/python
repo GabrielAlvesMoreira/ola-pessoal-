@@ -1,0 +1,64 @@
+import pandas as pd 
+
+# 1. Configuração inicial dos times
+times_serie_a = [
+    "Athletico-PR", "Atlético-GO", "Atlético-MG", "Bahia", "Botafogo",
+    "Bragantino", "Corinthians", "Criciúma", "Cruzeiro", "Cuiabá",
+    "Flamengo", "Fluminense", "Fortaleza", "Grêmio", "Internacional",
+    "Juventude", "Palmeiras", "São Paulo", "Vasco", "Vitória"
+]
+
+# Criando o DataFrame zerado
+colunas = ['Time', 'P', 'J', 'V', 'E', 'D', 'GP', 'GC', 'SG']
+tabela = pd.DataFrame(columns=colunas)
+tabela['Time'] = sorted(times_serie_a)
+tabela.update(tabela.fillna(0)) # Preenche as colunas numéricas com 0
+
+def registrar_jogo(df, time_casa, gols_casa, gols_fora, time_fora):
+    """Atualiza as estatísticas dos times com base no placar."""
+    
+    # Localiza os índices dos times
+    idx_casa = df.index[df['Time'] == time_casa].tolist()[0]
+    idx_fora = df.index[df['Time'] == time_fora].tolist()[0]
+    
+    # Atualiza Jogos e Gols
+    df.at[idx_casa, 'J'] += 1
+    df.at[idx_fora, 'J'] += 1
+    df.at[idx_casa, 'GP'] += gols_casa
+    df.at[idx_casa, 'GC'] += gols_fora
+    df.at[idx_fora, 'GP'] += gols_fora
+    df.at[idx_fora, 'GC'] += gols_casa
+    
+    # Lógica de Pontuação
+    if gols_casa > gols_fora:      # Vitória Mandante
+        df.at[idx_casa, 'P'] += 3
+        df.at[idx_casa, 'V'] += 1
+        df.at[idx_fora, 'D'] += 1
+    elif gols_casa < gols_fora:    # Vitória Visitante
+        df.at[idx_fora, 'P'] += 3
+        df.at[idx_fora, 'V'] += 1
+        df.at[idx_casa, 'D'] += 1
+    else:                          # Empate
+        df.at[idx_casa, 'P'] += 1
+        df.at[idx_fora, 'P'] += 1
+        df.at[idx_casa, 'E'] += 1
+        df.at[idx_fora, 'E'] += 1
+    
+    # Recalcula Saldo de Gols
+    df['SG'] = df['GP'] - df['GC']
+    return df
+
+# --- SIMULAÇÃO DE RODADA ---
+# Aqui você registra os jogos que aconteceram:
+tabela = registrar_jogo(tabela, "Flamengo", 2, 0, "Vasco")
+tabela = registrar_jogo(tabela, "Palmeiras", 1, 1, "São Paulo")
+tabela = registrar_jogo(tabela, "Botafogo", 3, 2, "Cruzeiro")
+tabela = registrar_jogo(tabela, "Bahia", 0, 1, "Vitória")
+
+# --- ORDENAÇÃO ---
+# Ordena por Pontos, Vitórias e Saldo de Gols (Critérios da CBF)
+tabela_final = tabela.sort_values(by=['P', 'V', 'SG'], ascending=False).reset_index(drop=True)
+tabela_final.index += 1 # Faz o ranking começar em 1
+
+print("        === TABELA BRASILEIRÃO SÉRIE A ===")
+print(tabela_final[['Time', 'P', 'J', 'V', 'E', 'D', 'SG']])
