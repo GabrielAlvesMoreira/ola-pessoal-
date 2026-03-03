@@ -1,5 +1,5 @@
 # olá,pessoal!
-meu primeiro repositorio,*cursado pelo guanabara*
+meu primeiro repositorio,**cursado pelo guanabara**
 
 criado para trabalho!
 
