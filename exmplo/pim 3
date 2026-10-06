@@ -1,0 +1,836 @@
+# Interface_PIMII.py - Atualizado com Acessibilidade e Diversidade
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, simpledialog
+from PIL import Image, ImageTk
+import csv
+import os
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import io
+import random
+
+# =================== CONFIGS ===================
+BASE_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_PROJECT_DIR, "output")
+CONFIDENTIAL_DATA_DIR = os.path.join(OUTPUT_DIR, "dados_confidenciais")
+
+ARQUIVO_CREDENCIAIS = os.path.join(CONFIDENTIAL_DATA_DIR, "credenciais_alunos.csv")
+ARQUIVO_CREDENCIAIS_PROFESSORES = os.path.join(CONFIDENTIAL_DATA_DIR, "credenciais_professores.csv")
+ARQUIVO_MAPEAMENTO_PROFESSORES = os.path.join(CONFIDENTIAL_DATA_DIR, "professores.csv")
+ARQUIVO_NOMES_DISCIPLINAS = os.path.join(CONFIDENTIAL_DATA_DIR, "disciplinas_nomes.csv")
+DEFAULT_CSV_FILE_PATH = os.path.join(CONFIDENTIAL_DATA_DIR, "alunos.csv")
+DEFAULT_CSV_FILE = "alunos.csv"
+CREDENTIALS_DIR = CONFIDENTIAL_DATA_DIR 
+
+# Estado de Acessibilidade
+MODO_ALTO_CONTRASTE = False
+TAMANHO_FONTE = 10
+
+# Cores Padrão
+BG_DARK = '#212121'
+FRAME_BG = '#3A3A3A'
+TEXT_FG = 'white'
+BTN_ROXO_BASE = '#4A148C'
+BTN_ROXO_CLARO = '#6A1B9A'
+BTN_FG = 'white'
+BTN_EXIT_BG = '#8B0000'
+BTN_AMARELO_CADASTRO = '#CCAA00'
+
+# Cores Alto Contraste
+HC_BG = '#000000'
+HC_FRAME = '#1A1A1A'
+HC_TEXT = '#FFFF00'
+HC_BTN = '#000000'
+HC_BTN_FG = '#00FF00'
+
+# =================== GLOBAIS ===================
+LISTA_DISCIPLINAS = ["LingEstC", "Python", "EngSoft", "APS", "Extra"] 
+DISPLAY_NAMES = {} 
+
+dados_alunos = []
+caminho_arquivo_atual = None
+nivel_acesso_atual = None
+usuario_logado = None
+canvas_grafico = None
+botao_fechar_grafico = None
+janela_imagem_fundo = None
+geometria_principal = None 
+geometria_login = None 
+login_frame_global = None 
+
+# Mapeamento do CSV com novos campos de Diversidade:
+# [0: Nome, 1: Nome Social, 2: RA, 3: Email, 4: Etnia, 5..9: Disciplinas, 10: Media Geral]
+NUM_COLUNAS_ESPERADAS = 5 + len(LISTA_DISCIPLINAS) + 1 
+COLUNA_MAP = {}
+i = 5
+for disc in LISTA_DISCIPLINAS:
+    COLUNA_MAP[disc] = i
+    i += 1
+COLUNA_MAP["Media Geral"] = i
+
+CREDENCIAIS = {
+    "Admin": {"admin": "admin123"},
+    "Professores": {},
+    "Alunos": {}
+}
+PROFESSORES_POR_DISCIPLINA = {}
+PROFESSOR_TO_COLNAME = {}
+
+# --- Widgets Globais ---
+frame_principal_interativo = None
+frame_botoes = None
+frame_tree = None
+btn_selecionar = None
+btn_lancar_notas = None
+btn_ver_notas = None
+btn_gerar_grafico = None
+btn_ver_professores = None
+btn_ia = None
+btn_sair = None
+btn_excluir_usuarios = None 
+tree = None
+scrollbar = None
+
+# =================== UTILIDADES ===================
+def carregar_nomes_disciplinas():
+    global DISPLAY_NAMES
+    DISPLAY_NAMES = {}
+    for disc in LISTA_DISCIPLINAS:
+        DISPLAY_NAMES[disc] = disc
+    DISPLAY_NAMES["Media Geral"] = "Media Geral"
+
+    if not os.path.exists(ARQUIVO_NOMES_DISCIPLINAS):
+        salvar_nomes_disciplinas()
+        return
+
+    try:
+        with open(ARQUIVO_NOMES_DISCIPLINAS, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader, None) 
+            for linha in reader:
+                if len(linha) >= 2:
+                    internal_name, display_name = linha
+                    if internal_name in DISPLAY_NAMES: 
+                        DISPLAY_NAMES[internal_name] = display_name
+    except Exception as e:
+        salvar_nomes_disciplinas()
+
+def salvar_nomes_disciplinas():
+    os.makedirs(CONFIDENTIAL_DATA_DIR, exist_ok=True) 
+    try:
+        with open(ARQUIVO_NOMES_DISCIPLINAS, "w", newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["InternalName", "DisplayName"])
+            for internal, display in DISPLAY_NAMES.items():
+                if internal in LISTA_DISCIPLINAS: 
+                    writer.writerow([internal, display])
+        return True
+    except Exception as e:
+        return False
+
+def carregar_credenciais_alunos():
+    novas_creds = {}
+    if not os.path.exists(ARQUIVO_CREDENCIAIS):
+        return novas_creds
+    try:
+        with open(ARQUIVO_CREDENCIAIS, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            next(reader, None)
+            for linha in reader:
+                if len(linha) >= 2:
+                    login = linha[0].strip().lower()
+                    senha = linha[1].strip()
+                    if login and senha:
+                        novas_creds[login] = senha
+    except Exception:
+        pass
+    return novas_creds
+
+def ler_linhas_csv(caminho_arquivo):
+    if not os.path.exists(caminho_arquivo):
+        return []
+    linhas = []
+    try:
+        with open(caminho_arquivo, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if row:
+                    linhas.append(row)
+    except Exception:
+        try:
+            with open(caminho_arquivo, 'r', newline='', encoding='latin-1') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if row:
+                        linhas.append(row)
+        except Exception as e:
+            messagebox.showerror("Erro de Leitura", f"Não foi possível ler {os.path.basename(caminho_arquivo)}: {e}")
+            return None
+    return linhas
+
+def salvar_linhas_csv(caminho_arquivo, linhas_de_dados, cabecalho_esperado):
+    try:
+        with open(caminho_arquivo, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(cabecalho_esperado)
+            writer.writerows(linhas_de_dados)
+        return True
+    except Exception as e:
+        messagebox.showerror("Erro de Salvamento", f"Não foi possível salvar {os.path.basename(caminho_arquivo)}: {e}")
+        return False
+
+def salvar_credenciais_csv(login, senha):
+    os.makedirs(CONFIDENTIAL_DATA_DIR, exist_ok=True) 
+    cabecalho = ["Login", "Senha"]
+    linhas = ler_linhas_csv(ARQUIVO_CREDENCIAIS)
+    if linhas is None: return False
+    dados_sem_cabecalho = [l for l in linhas if l and l[0].lower() != "login"]
+    dados_sem_cabecalho.append([login, senha])
+    return salvar_linhas_csv(ARQUIVO_CREDENCIAIS, dados_sem_cabecalho, cabecalho)
+
+def salvar_dados_no_csv(caminho, dados_novos):
+    os.makedirs(CONFIDENTIAL_DATA_DIR, exist_ok=True) 
+    cabecalho = ["Nome", "Nome Social", "RA", "Email", "Etnia"] + LISTA_DISCIPLINAS + ["Media Geral"]
+    linhas = ler_linhas_csv(caminho)
+    if linhas is None: return False
+    dados_sem_cabecalho = [l for l in linhas if l and l[0].lower() != "nome"]
+    dados_sem_cabecalho.append(dados_novos)
+    return salvar_linhas_csv(caminho, dados_sem_cabecalho, cabecalho)
+
+def _recalcular_media_geral(aluno):
+    notas = []
+    if len(aluno) >= NUM_COLUNAS_ESPERADAS:
+        for i in range(5, 5 + len(LISTA_DISCIPLINAS)):
+            try:
+                v = str(aluno[i]).strip()
+                if v != "":
+                    notas.append(float(v))
+            except (ValueError, IndexError):
+                pass
+
+        media_idx = COLUNA_MAP["Media Geral"]
+        if notas:
+            media = sum(notas) / len(notas)
+            if media_idx < len(aluno):
+                aluno[media_idx] = f"{media:.2f}"
+            else:
+                while len(aluno) <= media_idx: aluno.append("0.00")
+                aluno[media_idx] = f"{media:.2f}"
+        else:
+            if media_idx < len(aluno):
+                aluno[media_idx] = "0.00"
+            else:
+                while len(aluno) <= media_idx: aluno.append("0.00")
+                aluno[media_idx] = "0.00"
+    else:
+        while len(aluno) < NUM_COLUNAS_ESPERADAS:
+            aluno.append("0.00")
+
+def carregar_credenciais_professores():
+    novas_creds = {}
+    if not os.path.exists(ARQUIVO_CREDENCIAIS_PROFESSORES):
+        return novas_creds
+    try:
+        with open(ARQUIVO_CREDENCIAIS_PROFESSORES, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            next(reader, None)
+            for linha in reader:
+                if len(linha) >= 2:
+                    login = linha[0].strip().lower()
+                    senha = linha[1].strip()
+                    if login and senha:
+                        novas_creds[login] = senha
+    except Exception:
+        pass
+    return novas_creds
+
+def carregar_mapeamento_professores():
+    novo_map = {}
+    if not os.path.exists(ARQUIVO_MAPEAMENTO_PROFESSORES):
+        return novo_map
+    try:
+        with open(ARQUIVO_MAPEAMENTO_PROFESSORES, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            next(reader, None)
+            for linha in reader:
+                if len(linha) >= 2:
+                    login = linha[0].strip().lower()
+                    disciplina = linha[1].strip()
+                    if login and disciplina:
+                        novo_map[login] = disciplina
+    except Exception:
+        pass
+    return novo_map
+
+def salvar_credenciais_professor_csv(login, senha):
+    os.makedirs(CONFIDENTIAL_DATA_DIR, exist_ok=True) 
+    cabecalho = ["Login", "Senha"]
+    linhas = ler_linhas_csv(ARQUIVO_CREDENCIAIS_PROFESSORES)
+    if linhas is None: return False
+    dados = [l for l in linhas if l and l[0].lower() != "login"]
+    dados.append([login, senha])
+    return salvar_linhas_csv(ARQUIVO_CREDENCIAIS_PROFESSORES, dados, cabecalho)
+
+def salvar_mapeamento_professor_csv(login, disciplina_interna):
+    os.makedirs(CONFIDENTIAL_DATA_DIR, exist_ok=True)
+    cabecalho = ["Login", "Disciplina"]
+    linhas = ler_linhas_csv(ARQUIVO_MAPEAMENTO_PROFESSORES)
+    if linhas is None: return False
+    
+    mapeamentos = {}
+    for row in linhas:
+        if len(row) >= 2 and row[0].lower() != "login":
+            mapeamentos[row[0].strip().lower()] = row[1].strip()
+
+    mapeamentos[login] = disciplina_interna
+    linhas_para_salvar = [[prof_login, disc] for prof_login, disc in mapeamentos.items()]
+    return salvar_linhas_csv(ARQUIVO_MAPEAMENTO_PROFESSORES, linhas_para_salvar, cabecalho)
+
+def carregar_dados_professores():
+    global CREDENCIAIS, PROFESSOR_TO_COLNAME, PROFESSORES_POR_DISCIPLINA
+    CREDENCIAIS["Professores"] = carregar_credenciais_professores()
+    PROFESSOR_TO_COLNAME = carregar_mapeamento_professores()
+    PROFESSORES_POR_DISCIPLINA.clear()
+    for login, disciplina in PROFESSOR_TO_COLNAME.items():
+        if disciplina in COLUNA_MAP:
+            PROFESSORES_POR_DISCIPLINA[disciplina] = login
+
+# =================== ACESSIBILIDADE E TEMAS ===================
+def alternar_alto_contraste():
+    global MODO_ALTO_CONTRASTE
+    MODO_ALTO_CONTRASTE = not MODO_ALTO_CONTRASTE
+    aplicar_tema()
+
+def alterar_tamanho_fonte(delta):
+    global TAMANHO_FONTE
+    TAMANHO_FONTE = max(8, min(18, TAMANHO_FONTE + delta))
+    aplicar_tema()
+
+def aplicar_tema():
+    bg_curr = HC_BG if MODO_ALTO_CONTRASTE else BG_DARK
+    fg_curr = HC_TEXT if MODO_ALTO_CONTRASTE else TEXT_FG
+    frame_bg_curr = HC_FRAME if MODO_ALTO_CONTRASTE else FRAME_BG
+
+    janela.config(bg=bg_curr)
+    
+    style = ttk.Style(janela)
+    style.theme_use('clam')
+    style.configure("Treeview", 
+                    background=frame_bg_curr, 
+                    foreground=fg_curr, 
+                    fieldbackground=frame_bg_curr, 
+                    rowheight=max(25, int(TAMANHO_FONTE * 2.2)),
+                    font=("Arial", TAMANHO_FONTE))
+    style.configure("Treeview.Heading", 
+                    background=bg_curr, 
+                    foreground=fg_curr,
+                    font=("Arial", TAMANHO_FONTE, "bold"))
+
+    if nivel_acesso_atual:
+        construir_interface_principal()
+        mostrar_todos_alunos()
+    else:
+        mostrar_janela_login()
+
+# =================== JANELA FLUTUANTE ===================
+def mostrar_janela_imagem_flutuante(janela_pai, caminho_imagem):
+    global janela_imagem_fundo
+    janela_pai.after(100, lambda: _posicionar_imagem_flutuante(janela_pai, caminho_imagem)) 
+
+def _posicionar_imagem_flutuante(janela_pai, caminho_imagem):
+    global janela_imagem_fundo
+    try:
+        if not janela_pai.winfo_exists(): return
+        janela_pai.update_idletasks()
+        pos_x_login = janela_pai.winfo_x()
+        pos_y_login = janela_pai.winfo_y()
+        largura_login = janela_pai.winfo_width()
+        altura_login = janela_pai.winfo_height()
+
+        largura_img = largura_login
+        altura_img = 100
+        MARGEM_VERTICAL = 40
+
+        if not os.path.exists(caminho_imagem): return
+
+        if janela_imagem_fundo and janela_imagem_fundo.winfo_exists():
+            janela_imagem_fundo.geometry(f'{largura_img}x{altura_img}+{pos_x_login}+{pos_y_login + altura_login + MARGEM_VERTICAL}')
+            return
+
+        janela_imagem_fundo = tk.Toplevel(janela_pai, bg=FRAME_BG)
+        janela_imagem_fundo.title("Acessibilidade & Unip")
+        janela_imagem_fundo.attributes('-topmost', True)
+
+        img_pil = Image.open(caminho_imagem).convert("RGB")
+        img_redimensionada = img_pil.resize((largura_img, altura_img), Image.LANCZOS)
+        img_tk_local = ImageTk.PhotoImage(img_redimensionada)
+
+        label_fundo = tk.Label(janela_imagem_fundo, image=img_tk_local, bg=FRAME_BG)
+        label_fundo.pack(fill=tk.BOTH, expand=True)
+        janela_imagem_fundo.photo_image = img_tk_local
+
+        janela_imagem_fundo.geometry(f'{largura_img}x{altura_img}+{pos_x_login}+{pos_y_login + altura_login + MARGEM_VERTICAL}')
+        janela_pai.bind("<Destroy>", fechar_janela_imagem_fundo, add="+")
+    except Exception as e:
+        print(f"Erro na imagem flutuante: {e}")
+
+def fechar_janela_imagem_fundo(*args):
+    global janela_imagem_fundo
+    if janela_imagem_fundo and janela_imagem_fundo.winfo_exists():
+        janela_imagem_fundo.destroy()
+        janela_imagem_fundo = None
+
+# =================== LÓGICA DE DADOS ===================
+def selecionar_arquivo(caminho=None):
+    global caminho_arquivo_atual, dados_alunos
+    if caminho is None:
+        caminho = filedialog.askopenfilename(
+            title="Selecione o arquivo CSV de alunos",
+            initialdir=CREDENTIALS_DIR,
+            filetypes=[("Arquivos CSV", "*.csv"), ("Todos os arquivos", "*.*")]
+        )
+    if not caminho and os.path.exists(DEFAULT_CSV_FILE_PATH):
+        caminho = DEFAULT_CSV_FILE_PATH
+    elif not caminho:
+        return
+
+    caminho_arquivo_atual = caminho
+    linhas = ler_linhas_csv(caminho)
+    if not linhas:
+        mostrar_todos_alunos()
+        return
+
+    dados_validos = []
+    for i, linha in enumerate(linhas[1:], start=1):
+        if not linha: continue
+        
+        # Compatibilidade com arquivos antigos que possuem menos colunas
+        if len(linha) < NUM_COLUNAS_ESPERADAS:
+            nome = linha[0] if len(linha) > 0 else ""
+            ra = linha[1] if len(linha) > 1 else ""
+            email = linha[2] if len(linha) > 2 else ""
+            nome_social = ""
+            etnia = "Não informado"
+            notas = linha[3:] if len(linha) > 3 else ["0.00"] * len(LISTA_DISCIPLINAS)
+            linha_proc = [nome, nome_social, ra, email, etnia] + notas
+        else:
+            linha_proc = linha[:NUM_COLUNAS_ESPERADAS]
+
+        while len(linha_proc) < NUM_COLUNAS_ESPERADAS:
+            linha_proc.append("0.00")
+
+        _recalcular_media_geral(linha_proc)
+        dados_validos.append(linha_proc)
+
+    dados_alunos = dados_validos
+    mostrar_todos_alunos()
+
+def lancar_nota():
+    if nivel_acesso_atual not in ["Admin", "Professores"]:
+        messagebox.showwarning("Acesso Negado", "Apenas Administradores e Professores podem lançar notas.")
+        return
+    if not dados_alunos:
+        messagebox.showwarning("Aviso", "Nenhum aluno carregado.")
+        return
+
+    coluna_indice = None
+    disciplina_nome_display = None
+
+    if nivel_acesso_atual == "Admin":
+        prompt_disciplinas = ", ".join([DISPLAY_NAMES.get(d, d) for d in LISTA_DISCIPLINAS])
+        escolha = simpledialog.askstring("Admin: Selecionar Disciplina", f"Digite a disciplina ({prompt_disciplinas}):", parent=janela)
+        if not escolha: return
+        chave = escolha.strip().lower()
+        for internal in LISTA_DISCIPLINAS:
+            if DISPLAY_NAMES.get(internal, internal).lower() == chave or internal.lower() == chave:
+                coluna_indice = COLUNA_MAP[internal]
+                disciplina_nome_display = DISPLAY_NAMES.get(internal, internal)
+                break
+        if coluna_indice is None:
+            messagebox.showerror("Erro", "Disciplina não encontrada.")
+            return
+    else:
+        disciplina_interna = PROFESSOR_TO_COLNAME.get(usuario_logado, None)
+        coluna_indice = COLUNA_MAP.get(disciplina_interna, None)
+        disciplina_nome_display = DISPLAY_NAMES.get(disciplina_interna, disciplina_interna)
+
+    num = simpledialog.askinteger("Lançar Nota", f"Selecione o número do aluno (1 a {len(dados_alunos)}):", parent=janela, minvalue=1, maxvalue=len(dados_alunos))
+    if num is None: return
+    indice_aluno = num - 1
+    aluno_selecionado = dados_alunos[indice_aluno]
+
+    # Prioriza Exibição do Nome Social se existir
+    nome_exibicao = aluno_selecionado[1] if aluno_selecionado[1].strip() else aluno_selecionado[0]
+
+    nova_nota_str = simpledialog.askstring("Lançar Nota", f"Nova nota para {nome_exibicao} em {disciplina_nome_display}:", parent=janela)
+    if nova_nota_str is None: return
+    try:
+        nova_nota = float(nova_nota_str.replace(',', '.'))
+        if not (0.0 <= nova_nota <= 10.0): raise ValueError()
+    except ValueError:
+        messagebox.showerror("Erro", "A nota deve ser um número entre 0.0 e 10.0.")
+        return
+
+    aluno_modificado = list(aluno_selecionado)
+    aluno_modificado[coluna_indice] = f"{nova_nota:.2f}"
+    _recalcular_media_geral(aluno_modificado)
+
+    dados_alunos[indice_aluno] = aluno_modificado
+    if caminho_arquivo_atual:
+        linhas = ler_linhas_csv(caminho_arquivo_atual)
+        if linhas:
+            cabecalho = linhas.pop(0)
+            if 0 <= indice_aluno < len(linhas):
+                linhas[indice_aluno] = aluno_modificado
+            salvar_linhas_csv(caminho_arquivo_atual, linhas, cabecalho)
+
+    mostrar_todos_alunos()
+    messagebox.showinfo("Sucesso", f"Nota de {nome_exibicao} atualizada para {nova_nota:.2f}.")
+
+def mostrar_todos_alunos():
+    if 'tree' not in globals() or tree is None: return
+    for item in tree.get_children():
+        tree.delete(item)
+
+    alunos_a_exibir = dados_alunos
+    if nivel_acesso_atual == "Alunos":
+        usuario_aluno = usuario_logado
+        alunos_a_exibir = []
+        for aluno in dados_alunos:
+            # Checa se login corresponde ao email/nome/nome_social
+            login_aluno = aluno[3].split('@')[0].lower() if len(aluno) > 3 and '@' in aluno[3] else aluno[0].split()[0].lower()
+            if login_aluno == usuario_aluno or aluno[0].split()[0].lower() == usuario_aluno:
+                alunos_a_exibir.append(aluno)
+                break
+
+    colunas_visiveis_tree = ["#", "Nome Exibido", "Nome Social", "RA", "Email", "Etnia"]
+    indices_dados_visiveis = [0, 1, 2, 3, 4] # Nome, Nome Social, RA, Email, Etnia
+    
+    for disc_interna in LISTA_DISCIPLINAS:
+        if disc_interna != "Extra" or "Extra" in PROFESSORES_POR_DISCIPLINA:
+            colunas_visiveis_tree.append(disc_interna)
+            indices_dados_visiveis.append(COLUNA_MAP.get(disc_interna))
+
+    colunas_visiveis_tree.append("Media Geral")
+    indices_dados_visiveis.append(COLUNA_MAP.get("Media Geral"))
+        
+    tree["columns"] = colunas_visiveis_tree
+    tree["show"] = "headings"
+
+    for col_interna in colunas_visiveis_tree:
+        display_text = DISPLAY_NAMES.get(col_interna, col_interna)
+        tree.heading(col_interna, text=display_text)
+        tree.column(col_interna, width=110, anchor=tk.CENTER if col_interna not in ["Nome Exibido", "Email"] else tk.W)
+
+    for i, linha_completa in enumerate(alunos_a_exibir):
+        # Seleção de Nome Exibido (Prioriza Nome Social)
+        nome_civil = linha_completa[0] if len(linha_completa) > 0 else ""
+        nome_soc = linha_completa[1] if len(linha_completa) > 1 else ""
+        nome_prioritario = nome_soc if nome_soc.strip() else nome_civil
+
+        dados_para_tree = [i + 1, nome_prioritario]
+        
+        # Adiciona Nome Social, RA, Email, Etnia, Disciplinas e Média Geral
+        for idx in indices_dados_visiveis[1:]:
+            if idx is not None and 0 <= idx < len(linha_completa):
+                dados_para_tree.append(linha_completa[idx])
+            else:
+                dados_para_tree.append("N/A")
+
+        if nivel_acesso_atual == "Professores":
+            disciplina_prof = PROFESSOR_TO_COLNAME.get(usuario_logado, "")
+            # Oculta notas de outras disciplinas para o professor
+            col_idx_tree = 6 
+            for disc_interna in LISTA_DISCIPLINAS:
+                if disc_interna == "Extra" and "Extra" not in PROFESSORES_POR_DISCIPLINA: continue
+                if disc_interna != disciplina_prof and col_idx_tree < len(dados_para_tree):
+                    dados_para_tree[col_idx_tree] = "---"
+                col_idx_tree += 1
+            if col_idx_tree < len(dados_para_tree):
+                dados_para_tree[col_idx_tree] = "---"
+
+        tree.insert("", "end", values=dados_para_tree)
+
+def obter_indice_aluno():
+    if not dados_alunos: return None
+    if nivel_acesso_atual == "Alunos":
+        return 0 if len(dados_alunos) > 0 else None
+    num = simpledialog.askinteger("Selecionar Aluno", f"Digite o número do aluno (1 a {len(dados_alunos)}):", parent=janela, minvalue=1, maxvalue=len(dados_alunos))
+    return (num - 1) if num else None
+
+def mostrar_notas():
+    indice = obter_indice_aluno()
+    if indice is None or not (0 <= indice < len(dados_alunos)): return
+
+    aluno = dados_alunos[indice]
+    nome_exibicao = aluno[1] if len(aluno) > 1 and aluno[1].strip() else aluno[0]
+
+    janela_notas = tk.Toplevel(janela)
+    janela_notas.title(f"Notas de {nome_exibicao}")
+    janela_notas.geometry("450x320")
+
+    texto = f"Aluno: {nome_exibicao}\nRA: {aluno[2]}\n\n"
+    if nivel_acesso_atual == "Professores":
+        disc_prof = PROFESSOR_TO_COLNAME.get(usuario_logado, None)
+        col_idx = COLUNA_MAP.get(disc_prof)
+        if disc_prof and col_idx < len(aluno):
+            texto += f"{DISPLAY_NAMES.get(disc_prof, disc_prof)}: {aluno[col_idx]}\n"
+    else:
+        for disc_interna in LISTA_DISCIPLINAS:
+            if disc_interna == "Extra" and "Extra" not in PROFESSORES_POR_DISCIPLINA: continue
+            col_idx = COLUNA_MAP.get(disc_interna)
+            texto += f"{DISPLAY_NAMES.get(disc_interna, disc_interna)}: {aluno[col_idx] if col_idx < len(aluno) else 'N/A'}\n"
+        texto += f"\n============================\nMÉDIA GERAL: {aluno[COLUNA_MAP['Media Geral']]}\n"
+
+    tk.Label(janela_notas, text=texto, font=("Arial", 11), justify=tk.LEFT, padx=20, pady=20).pack()
+
+def gerar_grafico():
+    indice = obter_indice_aluno()
+    if indice is None or not (0 <= indice < len(dados_alunos)): return
+
+    global canvas_grafico, botao_fechar_grafico
+    if canvas_grafico: canvas_grafico.get_tk_widget().destroy()
+    if botao_fechar_grafico: botao_fechar_grafico.destroy()
+
+    aluno = dados_alunos[indice]
+    nome_exibicao = aluno[1] if len(aluno) > 1 and aluno[1].strip() else aluno[0]
+
+    disciplinas_finais = []
+    medias_finais = []
+    for disc_interna in LISTA_DISCIPLINAS:
+        if disc_interna == "Extra" and "Extra" not in PROFESSORES_POR_DISCIPLINA: continue
+        disciplinas_finais.append(DISPLAY_NAMES.get(disc_interna, disc_interna))
+        col_idx = COLUNA_MAP.get(disc_interna)
+        try: medias_finais.append(float(aluno[col_idx]))
+        except: medias_finais.append(0.0)
+
+    fig, ax = plt.subplots(figsize=(6,3.5))
+    ax.bar(disciplinas_finais, medias_finais, color='#6A1B9A')
+    ax.set_ylim(0, 10)
+    ax.set_title(f'Desempenho Acadêmico - {nome_exibicao}')
+    
+    canvas_grafico = FigureCanvasTkAgg(fig, master=janela)
+    canvas_grafico.draw()
+    canvas_grafico.get_tk_widget().pack(pady=10, fill=tk.BOTH, expand=False)
+
+    botao_fechar_grafico = tk.Button(janela, text="Fechar Gráfico", command=lambda: [canvas_grafico.get_tk_widget().destroy(), botao_fechar_grafico.destroy()], bg="red", fg="white")
+    botao_fechar_grafico.pack(pady=5)
+
+def mostrar_professores():
+    janela_prof = tk.Toplevel(janela)
+    janela_prof.title("Quadro de Professores")
+    janela_prof.geometry("380x250")
+    texto = "=== Corpo Docente por Disciplina ===\n\n"
+    for disc_interna in LISTA_DISCIPLINAS:
+        prof = PROFESSORES_POR_DISCIPLINA.get(disc_interna, "(Vago)")
+        texto += f"{DISPLAY_NAMES.get(disc_interna, disc_interna)}: {prof.capitalize()}\n"
+    tk.Label(janela_prof, text=texto, font=("Arial", 11), justify=tk.LEFT, padx=20, pady=20).pack()
+
+def analisar_por_ia():
+    if nivel_acesso_atual != "Alunos": return
+    aluno = dados_alunos[0] if dados_alunos else None
+    if not aluno: return
+
+    nome_exibicao = aluno[1] if len(aluno) > 1 and aluno[1].strip() else aluno[0]
+    media_geral = float(aluno[COLUNA_MAP["Media Geral"]])
+
+    msg = f"Olá, {nome_exibicao}!\n\nSua média geral atual é {media_geral:.2f}.\n"
+    if media_geral >= 7.0:
+        msg += "Parabéns! Excelente desempenho acadêmico. Continue mantendo esse foco!"
+    else:
+        msg += "Atenção: Revise os tópicos das disciplinas com nota mais baixa para garantir sua aprovação."
+
+    messagebox.showinfo("Análise de Progresso I.A.", msg, parent=janela)
+
+# =================== CADASTROS E LOGIN ===================
+def verificar_credenciais(usuario, senha):
+    CREDENCIAIS["Alunos"] = carregar_credenciais_alunos()
+    CREDENCIAIS["Professores"] = carregar_credenciais_professores()
+    u_norm = usuario.strip().lower()
+
+    for admin_u, admin_p in CREDENCIAIS.get("Admin", {}).items():
+        if u_norm == admin_u.lower() and senha == admin_p: return "Admin"
+    for prof_u, prof_p in CREDENCIAIS.get("Professores", {}).items():
+        if u_norm == prof_u.lower() and senha == prof_p: return "Professores"
+    for aluno_u, aluno_p in CREDENCIAIS.get("Alunos", {}).items():
+        if u_norm == aluno_u.lower() and senha == aluno_p: return "Alunos"
+    return None
+
+def cadastrar_novo_aluno_interface(parent_window=None):
+    if parent_window is None: parent_window = janela
+    os.makedirs(CONFIDENTIAL_DATA_DIR, exist_ok=True)
+
+    nome = simpledialog.askstring("Cadastro Aluno (1/5)", "Nome Civil Completo:", parent=parent_window)
+    if not nome: return
+
+    nome_social = simpledialog.askstring("Cadastro Aluno (2/5)", "Nome Social (Opcional - Pressione Enter se não houver):", parent=parent_window) or ""
+
+    base_login = (nome_social if nome_social.strip() else nome).split()[0].lower()
+    login = base_login
+    creds_existentes = carregar_credenciais_alunos()
+    suffix = 1
+    while login in creds_existentes:
+        login = f"{base_login}{suffix}"
+        suffix += 1
+
+    senha = simpledialog.askstring("Cadastro Aluno (3/5)", f"Crie uma Senha para o login '{login}':", show='*', parent=parent_window)
+    if not senha: return
+
+    ra = simpledialog.askstring("Cadastro Aluno (4/5)", "RA (Registro Acadêmico):", parent=parent_window)
+    if not ra: return
+
+    email_padrao = login + "@unip.com"
+    email = simpledialog.askstring("Cadastro Aluno (5/5)", f"Email:", initialvalue=email_padrao, parent=parent_window) or email_padrao
+
+    etnia = simpledialog.askstring("Autodeclaração Étnico-Racial", "Autodeclaração Étnico-Racial (Opcional):\nEx: Amarela, Branca, Indígena, Parda, Preta:", parent=parent_window) or "Não informado"
+
+    notas_vazias = ["0.00"] * len(LISTA_DISCIPLINAS)
+    nova_linha = [nome, nome_social, ra, email, etnia] + notas_vazias + ["0.00"]
+
+    if salvar_dados_no_csv(DEFAULT_CSV_FILE_PATH, nova_linha) and salvar_credenciais_csv(login, senha):
+        messagebox.showinfo("Sucesso", f"Aluno cadastrado!\nLogin: '{login}'\nNome de Exibição: '{nome_social if nome_social else nome}'", parent=parent_window)
+
+def iniciar_cadastro_professor(parent_window=None):
+    if parent_window is None: parent_window = janela
+    senha_admin = simpledialog.askstring("Autenticação", "Digite a senha do 'admin':", show='*', parent=parent_window)
+    if senha_admin == CREDENCIAIS["Admin"]["admin"]:
+        cadastrar_novo_professor_interface(parent_window)
+
+def cadastrar_novo_professor_interface(parent_window=None):
+    if parent_window is None: parent_window = janela
+    login = simpledialog.askstring("Cadastro Professor", "Login do Professor:", parent=parent_window)
+    if not login: return
+    login = login.strip().lower()
+
+    senha = simpledialog.askstring("Cadastro Professor", "Senha:", show='*', parent=parent_window)
+    if not senha: return
+
+    disc_display = simpledialog.askstring("Cadastro Professor", f"Disciplina ({', '.join(LISTA_DISCIPLINAS)}):", parent=parent_window)
+    if not disc_display: return
+
+    disc_interna = disc_display.strip()
+    if salvar_credenciais_professor_csv(login, senha) and salvar_mapeamento_professor_csv(login, disc_interna):
+        carregar_dados_professores()
+        messagebox.showinfo("Sucesso", f"Professor '{login}' cadastrado com sucesso!", parent=parent_window)
+
+def tentar_login(user_entry, senha_entry):
+    global nivel_acesso_atual, usuario_logado, login_frame_global
+    u = user_entry.get().strip().lower()
+    s = senha_entry.get().strip()
+    nivel = verificar_credenciais(u, s)
+
+    if nivel:
+        nivel_acesso_atual = nivel
+        usuario_logado = u
+        if login_frame_global: login_frame_global.destroy()
+        fechar_janela_imagem_fundo()
+
+        construir_interface_principal()
+        janela.geometry(geometria_principal)
+        janela.title(f"Sistema Acadêmico - {nivel} ({u.capitalize()})")
+        selecionar_arquivo(caminho=DEFAULT_CSV_FILE_PATH)
+    else:
+        messagebox.showerror("Erro", "Usuário ou senha inválidos.", parent=janela)
+
+def mostrar_janela_login():
+    global login_frame_global
+    janela.geometry(geometria_login)
+
+    login_frame = tk.Frame(janela, bg=HC_FRAME if MODO_ALTO_CONTRASTE else FRAME_BG)
+    login_frame_global = login_frame
+    login_frame.pack(padx=10, pady=10, expand=True)
+
+    fg_col = HC_TEXT if MODO_ALTO_CONTRASTE else TEXT_FG
+
+    # Rótulos explícitos para leitores de tela
+    lbl_u = tk.Label(login_frame, text="Campo de Texto - Usuário:", bg=login_frame["bg"], fg=fg_col, font=("Arial", TAMANHO_FONTE))
+    lbl_u.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+    user_entry = tk.Entry(login_frame, font=("Arial", TAMANHO_FONTE), takefocus=True)
+    user_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+
+    lbl_s = tk.Label(login_frame, text="Campo de Texto - Senha:", bg=login_frame["bg"], fg=fg_col, font=("Arial", TAMANHO_FONTE))
+    lbl_s.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+    senha_entry = tk.Entry(login_frame, show="*", font=("Arial", TAMANHO_FONTE), takefocus=True)
+    senha_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+
+    user_entry.bind("<Return>", lambda e: senha_entry.focus_set())
+    senha_entry.bind("<Return>", lambda e: tentar_login(user_entry, senha_entry))
+
+    btn_entrar = tk.Button(login_frame, text="Entrar (Enter)", bg=BTN_ROXO_CLARO, fg="white", font=("Arial", TAMANHO_FONTE, "bold"), takefocus=True, command=lambda: tentar_login(user_entry, senha_entry))
+    btn_entrar.grid(row=2, column=0, columnspan=2, pady=5, sticky="ew")
+
+    tk.Button(login_frame, text="Cadastrar Aluno", bg=BTN_AMARELO_CADASTRO, fg="black", font=("Arial", TAMANHO_FONTE), takefocus=True, command=lambda: cadastrar_novo_aluno_interface(janela)).grid(row=3, column=0, columnspan=2, pady=3, sticky="ew")
+    tk.Button(login_frame, text="Cadastrar Professor", bg=BTN_AMARELO_CADASTRO, fg="black", font=("Arial", TAMANHO_FONTE), takefocus=True, command=lambda: iniciar_cadastro_professor(janela)).grid(row=4, column=0, columnspan=2, pady=3, sticky="ew")
+
+    caminho_imagem = os.path.join(BASE_PROJECT_DIR, "UNIP.jpg")
+    janela.after(100, lambda: mostrar_janela_imagem_flutuante(janela, caminho_imagem))
+    user_entry.focus_set()
+
+# =================== INTERFACE PRINCIPAL ===================
+def construir_interface_principal():
+    global btn_selecionar, btn_lancar_notas, btn_ver_notas, btn_gerar_grafico
+    global btn_ver_professores, btn_ia, tree, scrollbar, frame_principal_interativo
+
+    for widget in janela.winfo_children(): widget.destroy()
+
+    bg_curr = HC_BG if MODO_ALTO_CONTRASTE else BG_DARK
+    fg_curr = HC_TEXT if MODO_ALTO_CONTRASTE else TEXT_FG
+    janela.config(bg=bg_curr)
+
+    # BARRA DE ACESSIBILIDADE
+    frame_acessibilidade = tk.Frame(janela, bg=bg_curr)
+    frame_acessibilidade.pack(fill=tk.X, padx=10, pady=5)
+
+    lbl_acess = tk.Label(frame_acessibilidade, text="Acessibilidade:", fg=fg_curr, bg=bg_curr, font=("Arial", TAMANHO_FONTE, "bold"))
+    lbl_acess.pack(side=tk.LEFT, padx=5)
+
+    btn_hc = tk.Button(frame_acessibilidade, text="Alto Contraste", command=alternar_alto_contraste, font=("Arial", TAMANHO_FONTE), takefocus=True)
+    btn_hc.pack(side=tk.LEFT, padx=5)
+
+    btn_font_plus = tk.Button(frame_acessibilidade, text="A+", command=lambda: alterar_tamanho_fonte(1), font=("Arial", TAMANHO_FONTE, "bold"), takefocus=True)
+    btn_font_plus.pack(side=tk.LEFT, padx=2)
+
+    btn_font_minus = tk.Button(frame_acessibilidade, text="A-", command=lambda: alterar_tamanho_fonte(-1), font=("Arial", TAMANHO_FONTE, "bold"), takefocus=True)
+    btn_font_minus.pack(side=tk.LEFT, padx=2)
+
+    frame_principal_interativo = tk.Frame(janela, bg=bg_curr)
+    frame_principal_interativo.pack(fill=tk.BOTH, expand=True)
+
+    frame_botoes = tk.Frame(frame_principal_interativo, bg=bg_curr)
+    frame_botoes.pack(pady=5)
+
+    btn_selecionar = tk.Button(frame_botoes, text="Selecionar CSV", command=selecionar_arquivo, bg=BTN_ROXO_BASE, fg=BTN_FG, font=("Arial", TAMANHO_FONTE), takefocus=True)
+    btn_lancar_notas = tk.Button(frame_botoes, text="Lançar Notas", command=lancar_nota, bg=BTN_ROXO_CLARO, fg=BTN_FG, font=("Arial", TAMANHO_FONTE), takefocus=True)
+    btn_ver_notas = tk.Button(frame_botoes, text="Ver Notas", command=mostrar_notas, bg=BTN_ROXO_CLARO, fg=BTN_FG, font=("Arial", TAMANHO_FONTE), takefocus=True)
+    btn_gerar_grafico = tk.Button(frame_botoes, text="Gerar Gráfico", command=gerar_grafico, bg=BTN_ROXO_CLARO, fg=BTN_FG, font=("Arial", TAMANHO_FONTE), takefocus=True)
+    btn_ver_professores = tk.Button(frame_botoes, text="Ver Professores", command=mostrar_professores, bg=BTN_ROXO_CLARO, fg=BTN_FG, font=("Arial", TAMANHO_FONTE), takefocus=True)
+    btn_ia = tk.Button(frame_botoes, text="I.A Motivacional", command=analisar_por_ia, bg=BTN_ROXO_CLARO, fg=BTN_FG, font=("Arial", TAMANHO_FONTE, "bold"), takefocus=True)
+
+    botoes = [btn_selecionar, btn_lancar_notas, btn_ver_notas, btn_gerar_grafico, btn_ver_professores, btn_ia]
+    for idx, b in enumerate(botoes):
+        b.grid(row=0, column=idx, padx=4)
+
+    frame_tree = tk.Frame(frame_principal_interativo, bg=bg_curr)
+    frame_tree.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+    tree = ttk.Treeview(frame_tree, takefocus=True)
+    tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar = ttk.Scrollbar(frame_tree, orient="vertical", command=tree.yview)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    tree.configure(yscrollcommand=scrollbar.set)
+
+# =================== INICIALIZAÇÃO ===================
+janela = tk.Tk()
+janela.title("Sistema Acadêmico - Login")
+
+largura_tela = janela.winfo_screenwidth()
+altura_tela = janela.winfo_screenheight()
+
+geometria_principal = f'{min(1100, largura_tela - 40)}x700+{(largura_tela-1100)//2}+{(altura_tela-700)//2}'
+geometria_login = f'360x280+{(largura_tela-360)//2}+{(altura_tela-280)//2}'
+
+carregar_nomes_disciplinas()
+carregar_dados_professores()
+
+mostrar_janela_login()
+janela.mainloop()
